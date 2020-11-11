@@ -1,177 +1,42 @@
 #![feature(is_sorted)]
+#![feature(option_result_contains)]
+#![feature(bool_to_option)]
 #![feature(array_map)]
 
-use num_derive::FromPrimitive;
-use std::fmt::Debug;
-use strum::{EnumIter, IntoEnumIterator};
+use std::convert::TryInto;
+use strum::IntoEnumIterator;
 
-use Suit::*;
-use Value::*;
+mod cards;
+mod suit_map;
 
-#[derive(Debug, PartialOrd, PartialEq, Copy, Clone, Eq, Ord, Hash, FromPrimitive, EnumIter)]
-pub enum Value {
-    Two = 2,
-    Three = 3,
-    Four = 4,
-    Five = 5,
-    Six = 6,
-    Seven = 7,
-    Eight = 8,
-    Nine = 9,
-    Ten = 10,
-    Jack = 11,
-    Queen = 12,
-    King = 13,
-    Ace = 14,
-}
-
-impl Value {
-    pub const fn of(self, suit: Suit) -> Card {
-        Card { value: self, suit }
-    }
-
-    const fn shorthand(self) -> &'static str {
-        match self {
-            Two => "2",
-            Three => "3",
-            Four => "4",
-            Five => "5",
-            Six => "6",
-            Seven => "7",
-            Eight => "8",
-            Nine => "9",
-            Ten => "10",
-            Jack => "J",
-            Queen => "Q",
-            King => "K",
-            Ace => "A",
-        }
-    }
-}
-
-#[derive(Debug, PartialOrd, PartialEq, Copy, Clone, Eq, Ord, Hash, FromPrimitive, EnumIter)]
-pub enum Suit {
-    Clubs = 0,
-    Diamonds = 1,
-    Hearts = 2,
-    Spades = 3,
-}
-
-impl Suit {
-    const fn shorthand(self) -> &'static str {
-        match self {
-            Clubs => "C",
-            Diamonds => "D",
-            Hearts => "H",
-            Spades => "S",
-        }
-    }
-}
-
-#[derive(PartialOrd, PartialEq, Copy, Clone, Eq, Ord, Hash)]
-pub struct Card {
-    value: Value,
-    suit: Suit
-}
-
-impl Debug for Card {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "Card({}{})", self.value.shorthand(), self.suit.shorthand())
-    }
-}
-
-pub const CANONICAL_DECK: [Card; 52] = [
-    Two.of(Clubs),
-    Two.of(Diamonds),
-    Two.of(Hearts),
-    Two.of(Spades),
-    Three.of(Clubs),
-    Three.of(Diamonds),
-    Three.of(Hearts),
-    Three.of(Spades),
-    Four.of(Clubs),
-    Four.of(Diamonds),
-    Four.of(Hearts),
-    Four.of(Spades),
-    Five.of(Clubs),
-    Five.of(Diamonds),
-    Five.of(Hearts),
-    Five.of(Spades),
-    Six.of(Clubs),
-    Six.of(Diamonds),
-    Six.of(Hearts),
-    Six.of(Spades),
-    Seven.of(Clubs),
-    Seven.of(Diamonds),
-    Seven.of(Hearts),
-    Seven.of(Spades),
-    Eight.of(Clubs),
-    Eight.of(Diamonds),
-    Eight.of(Hearts),
-    Eight.of(Spades),
-    Nine.of(Clubs),
-    Nine.of(Diamonds),
-    Nine.of(Hearts),
-    Nine.of(Spades),
-    Ten.of(Clubs),
-    Ten.of(Diamonds),
-    Ten.of(Hearts),
-    Ten.of(Spades),
-    Jack.of(Clubs),
-    Jack.of(Diamonds),
-    Jack.of(Hearts),
-    Jack.of(Spades),
-    Queen.of(Clubs),
-    Queen.of(Diamonds),
-    Queen.of(Hearts),
-    Queen.of(Spades),
-    King.of(Clubs),
-    King.of(Diamonds),
-    King.of(Hearts),
-    King.of(Spades),
-    Ace.of(Clubs),
-    Ace.of(Diamonds),
-    Ace.of(Hearts),
-    Ace.of(Spades),
-];
-
-#[derive(Copy, Clone, Debug)]
-struct SuitPermutation([Suit; 4]);
-
-impl SuitPermutation {
-    /// Returns a new SuitPermutation from the unders
-    ///
-    /// target_suits is interpreted as the suit the corresponding original
-    /// suit should be output as, where the "starting order" is
-    ///      [Clubs, Diamonds, Hearts, Spades]
-    ///
-    /// e.g. [Hearts, Diamonds, Spades, Clubs] implies
-    ///   Clubs => Hearts
-    ///   Diamonds => Diamonds
-    ///   Hearts => Spades,
-    ///   Spades => Clubs
-    fn new(target_suits: [Suit; 4]) -> Self {
-        let mut seen_targets = [false; 4];
-        for target in &target_suits {
-            seen_targets[*target as usize] = true;
-        }
-        assert!(
-            seen_targets.iter().all(|seen| *seen),
-            "target_suits must contain all four suits"
-        );
-
-        Self(target_suits)
-    }
-
-    pub fn map(&self, suit: Suit) -> Suit {
-        self.0[suit as usize]
-    }
-}
+pub use cards::*;
+use suit_map::*;
 
 /// Permute cards to a new suit variation
-fn permute_suits(mut cards: Vec<Card>, permutation: SuitPermutation) -> Vec<Card> {
+///
+/// Returns a new SuitPermutation from the underlying targets.
+///
+/// target_suits is interpreted as the suit the corresponding original
+/// suit should be output as, where the "starting order" is
+///      [Clubs, Diamonds, Hearts, Spades]
+///
+/// e.g. [Hearts, Diamonds, Spades, Clubs] implies
+///   Clubs => Hearts
+///   Diamonds => Diamonds
+///   Hearts => Spades,
+///   Spades => Clubs
+fn permute_suits(mut cards: Vec<Card>, target_suits: SuitMap<Suit>) -> Vec<Card> {
+    let mut seen_targets = [false; 4];
+    for (_, target) in target_suits.iter() {
+        seen_targets[*target as usize] = true;
+    }
+    assert!(
+        seen_targets.iter().all(|seen| *seen),
+        "target_suits must contain all four suits"
+    );
+
     for card in &mut cards {
-        card.suit = permutation.map(card.suit);
+        card.suit = *target_suits.get(card.suit);
     }
 
     cards
@@ -180,48 +45,53 @@ fn permute_suits(mut cards: Vec<Card>, permutation: SuitPermutation) -> Vec<Card
 /// Get strategically equivalent hand with lexicographic minimum
 pub fn canonicalize_hand(mut cards: Vec<Card>) -> Vec<Card> {
     // map from original suit (by index) to assigned suit
-    let mut assigned_suits: [Option<Suit>; 4] = [None; 4];
-
-    // next suit generator
-    let mut suit_generator = Suit::iter();
+    let mut assigned_suits = SuitMap::new_copied(None);
 
     // sort hand cards
-    cards[0..2].sort();
+    sort_hand(&mut cards);
 
-    // sort table cards
-    cards[2..].sort();
-
-    dbg!(&cards);
-
-    let mut rest = &cards[..];
-
-    'per_card: loop {
-        rest = match rest.split_first() {
-            Some((card, remaining)) => {
-                while assigned_suits[card.suit as usize].is_none() {
-                    match get_next_suit_to_assign(card, remaining, &assigned_suits) {
-                        Some(suit) => assigned_suits[suit as usize] = suit_generator.next(),
-                        // All remaining cards are ambiguous, just let the assigned suits fill by the permutation
-                        None => break 'per_card
-                    }
-                }
-                remaining
-            }
-            None => break,
+    // hole is special case: it can either be resolved immediately, or if a
+    // double we need to look ahead to determine correct order
+    let hole = &mut cards[0..2].try_into().unwrap();
+    if let Some(suit) = hole_cards_same_value(hole).and_then(|ambiguous_group: SuitMap<bool>| {
+        find_first_intersection(&cards[2..], ambiguous_group)
+    }) {
+        // Swap the suits in the double if the second card has the first suit intersecting
+        // with the cards on the table.
+        if suit == hole[1].suit {
+            hole[1].suit = std::mem::replace(&mut hole[0].suit, suit);
         }
     }
 
-    let permutation = SuitPermutation::new(
-        assigned_suits.map(|suit| suit.or_else(|| suit_generator.next()).unwrap())
-    );
+    // next suit generator
+    let mut suit_generator = {
+        let mut iter = Suit::iter();
+        move || iter.next().unwrap()
+    };
 
-    dbg!(&permutation);
+    // Assign suits to hole cards - condition above guarantees that this is correctly ordered
+    *assigned_suits.get_mut(hole[0].suit) = Some(suit_generator());
+    assigned_suits.get_mut(hole[1].suit).get_or_insert_with(|| suit_generator());
+
+    let mut remaining = &cards[2..];
+    while let Some((card, next_remaining)) = remaining.split_first() {
+        while assigned_suits.get(card.suit).is_none() {
+            let suit = get_next_suit_to_assign(card, next_remaining, &assigned_suits);
+            let assigned = assigned_suits.get_mut(suit);
+            assert!(assigned.is_none());
+            *assigned = Some(suit_generator());
+        }
+
+        remaining = next_remaining;
+    }
+
+    let permutation =
+        assigned_suits.map(|suit| suit.unwrap_or_else(|| suit_generator()));
 
     cards = permute_suits(cards, permutation);
 
-    // sort cards again - pairs mean the original sort is not guaranteed to be correct any more
-    cards[0..2].sort();
-    cards[2..].sort();
+    // sort cards again - groups mean the original sort is not guaranteed to be correct any more
+    sort_hand(&mut cards);
 
     cards
 }
@@ -229,28 +99,78 @@ pub fn canonicalize_hand(mut cards: Vec<Card>) -> Vec<Card> {
 #[inline]
 fn get_next_suit_to_assign(
     card: &Card,
-    remaining: &[Card],
-    assigned_suits: &[Option<Suit>; 4],
-) -> Option<Suit> {
-    // This card's suit is already assigned, look at next card
-    if assigned_suits[card.suit as usize].is_some() {
-        return remaining.split_first().and_then(|(card, remaining)| {
-            get_next_suit_to_assign(card, remaining, assigned_suits)
-        });
+    mut remaining: &[Card],
+    assigned_suits: &SuitMap<Option<Suit>>,
+) -> Suit {
+    assert!(assigned_suits.get(card.suit).is_none());
+
+    let mut is_ambiguous_group = false;
+    let mut ambiguous_group = SuitMap::new_copied(false);
+    *ambiguous_group.get_mut(card.suit) = true;
+
+    while let Some((next_card, next_remaining)) = remaining.split_first() {
+        if next_card.value != card.value {
+            break;
+        }
+
+        if assigned_suits.get(next_card.suit).is_none() {
+            is_ambiguous_group = true;
+            *ambiguous_group.get_mut(next_card.suit) = true;
+        }
+
+        remaining = next_remaining;
     }
 
-    // This card's suit is not assigned; search against future cards for pairs, triples etc.
-
-    match remaining.split_first() {
-        Some((mut future_card, mut remaining)) => {
-            let is_ambiguous_group = false;
-
-            // TODO
-            Some(card.suit)
-        },
-        // No future cards, so return this card's suit
-        None => Some(card.suit)
+    if is_ambiguous_group {
+        find_first_intersection(remaining, ambiguous_group).unwrap_or(card.suit)
+    } else {
+        card.suit
     }
+}
+
+#[inline]
+fn hole_cards_same_value(hole: &[Card; 2]) -> Option<SuitMap<bool>> {
+    (hole[0].value == hole[1].value).then(|| {
+        let mut map = SuitMap::new_copied(false);
+        *map.get_mut(hole[0].suit) = true;
+        *map.get_mut(hole[1].suit) = true;
+        map
+    })
+}
+
+/// Find first suit which intersects with a group of suits.
+///
+/// Remaining is expected to be sorted by value.
+/// If remaining has a run of cards in the same value, and several of those intersect
+/// with `suits`, then the lowest suit (by ordering) in the intersection is returned.
+fn find_first_intersection(remaining: &[Card], suits: SuitMap<bool>) -> Option<Suit> {
+    let mut group = SuitMap::new_copied(false);
+    let mut group_value = None;
+
+    for card in remaining {
+        if group_value.is_some() && !group_value.contains(&card.value) {
+            // The intersecting group has ended
+            break;
+        }
+
+        if *suits.get(card.suit) {
+            group_value = Some(card.value);
+            *group.get_mut(card.suit) = true;
+        }
+    }
+
+    let found_suit = group
+        .iter()
+        .find_map(|(suit, is_present)| is_present.then_some(suit));
+    found_suit
+}
+
+#[inline]
+fn sort_hand(hand: &mut [Card]) {
+    // sort hole cards
+    hand[0..2].sort();
+    // sort table
+    hand[2..].sort();
 }
 
 #[cfg(test)]
@@ -258,8 +178,10 @@ mod tests {
     use super::*;
     use num_traits::FromPrimitive;
     use proptest::prelude::*;
-    use std::convert::TryInto;
     use std::collections::HashMap;
+
+    use Suit::*;
+    use Value::*;
 
     #[test]
     fn canonical_deck_sorted() {
@@ -284,18 +206,16 @@ mod tests {
             Two as usize..=Ace as usize,
             Diamonds as usize..=Spades as usize,
         )
-            .prop_map(|(value, suit)| {
-                Card {
-                    value: Value::from_usize(value).unwrap(),
-                    suit: Suit::from_usize(suit).unwrap(),
-                }
+            .prop_map(|(value, suit)| Card {
+                value: Value::from_usize(value).unwrap(),
+                suit: Suit::from_usize(suit).unwrap(),
             })
     }
 
-    fn any_suit_permutation() -> impl Strategy<Value = SuitPermutation> {
-        Just([Clubs, Diamonds, Hearts, Spades].to_vec())
+    fn any_suit_permutation() -> impl Strategy<Value = SuitMap<Suit>> {
+        Just([Clubs, Diamonds, Hearts, Spades])
             .prop_shuffle()
-            .prop_map(|perm_vec| SuitPermutation::new(perm_vec.as_slice().try_into().unwrap()))
+            .prop_map(Into::into)
     }
 
     // proptests for permute_suits
@@ -326,7 +246,7 @@ mod tests {
 
             assert_eq!(original_value_counts, permuted_value_counts);
             for (suit, count) in original_suit_counts {
-                assert_eq!(count, permuted_suit_counts[&permutation.map(suit)]);
+                assert_eq!(count, permuted_suit_counts[permutation.get(suit)]);
             }
         }
 
@@ -366,28 +286,66 @@ mod tests {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig::with_cases(10000))]
+        #![proptest_config(ProptestConfig::with_cases(100000))]
 
         #[test]
-        fn test_canonicalize_hand_lexicographic_minimum_general(
+        fn test_canonicalize_hand_lexicographic_minimum(
             hand in any_hand(),
             permutation in any_suit_permutation(),
         ) {
             dbg!(&hand);
             let canonical = canonicalize_hand(hand);
             let mut permuted = permute_suits(canonical.clone(), permutation);
-            permuted[0..2].sort();
-            permuted[2..].sort();
+            sort_hand(&mut permuted);
             dbg!((&canonical, &permuted));
             assert!(canonical <= permuted);
         }
+
+        #[test]
+        fn test_canonicalize_hand_idempotent(
+            hand in any_hand(),
+        ) {
+            // canonicalizing the canonical hand should be an identity operation
+            let len = hand.len();
+            let canonical = canonicalize_hand(hand);
+            let canonical2 = canonicalize_hand(canonical.clone());
+            assert_eq!(canonical.len(), len);
+            assert_eq!(canonical, canonical2);
+        }
     }
+
     #[test]
     fn test_canonicalize_hand_perverse_case_one() {
+        // Ensure that the hole ambiguity can be resolved by the first card of the table.
         let hand = vec![
             Two.of(Clubs),
             Two.of(Spades),
-            Three.of(Clubs),
+            Three.of(Spades),
+            Four.of(Spades),
+            Five.of(Spades),
+        ];
+        let canonical = canonicalize_hand(hand.clone());
+
+        assert_eq!(
+            canonical,
+            vec![
+                Two.of(Clubs),
+                Two.of(Diamonds),
+                Three.of(Clubs),
+                Four.of(Clubs),
+                Five.of(Clubs),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_canonicalize_hand_perverse_case_two() {
+        // Ensure that the hole ambiguity is resolved when the table
+        // has an intersecting pair only later in the ordering.
+        let hand = vec![
+            Two.of(Spades),
+            Two.of(Clubs),
+            Two.of(Hearts),
             Three.of(Spades),
             Three.of(Diamonds),
         ];
@@ -398,33 +356,10 @@ mod tests {
             vec![
                 Two.of(Clubs),
                 Two.of(Diamonds),
+                Two.of(Hearts),
                 Three.of(Clubs),
-                Three.of(Diamonds),
-                Three.of(Hearts)
+                Three.of(Spades),
             ]
         );
     }
-
-    // #[test]
-    // fn test_canonicalize_hand_perverse_case_one() {
-    //     let hand = vec![
-    //         Two.of(Clubs),
-    //         Two.of(Spades),
-    //         Three.of(Clubs),
-    //         Three.of(Spades),
-    //         Three.of(Diamonds),
-    //     ];
-    //     let canonical = canonicalize_hand(hand.clone());
-
-    //     assert_eq!(
-    //         canonical,
-    //         vec![
-    //             Two.of(Clubs),
-    //             Two.of(Diamonds),
-    //             Three.of(Clubs),
-    //             Three.of(Diamonds),
-    //             Three.of(Hearts)
-    //         ]
-    //     );
-    // }
 }
