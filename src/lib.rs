@@ -138,19 +138,32 @@ fn hole_cards_same_value(hole: &[Card; 2]) -> Option<SuitMap<bool>> {
     })
 }
 
-/// Find first suit which intersects with a group of suits.
+/// Find first suit which intersects "singly" with a group of suits.
+///
+/// If remaining has a run of cards in the same value, and several of those intersect
+/// with `suits`, then that run is used as a new subset to continue searching for the
+/// next interection.
+///
+/// If remaining ends with a run of cards in the same value, and several of those intersect
+/// with `suits`, then the lowest suit (by ordering) in the intersection is returned.
 ///
 /// Remaining is expected to be sorted by value.
-/// If remaining has a run of cards in the same value, and several of those intersect
-/// with `suits`, then the lowest suit (by ordering) in the intersection is returned.
-fn find_first_intersection(remaining: &[Card], suits: SuitMap<bool>) -> Option<Suit> {
+fn find_first_intersection(remaining: &[Card], mut suits: SuitMap<bool>) -> Option<Suit> {
     let mut group = SuitMap::new_copied(false);
     let mut group_value = None;
 
     for card in remaining {
         if group_value.is_some() && !group_value.contains(&card.value) {
             // The intersecting group has ended
-            break;
+            if group.iter().filter(|(_, is_present)| **is_present).count() > 1 {
+                // But it's still ambiguous, reset to this subset and continue
+                suits = group;
+                group = SuitMap::new_copied(false);
+                group_value = None;
+            } else {
+                // It resolves the ambiguity !
+                break;
+            }
         }
 
         if *suits.get(card.suit) {
@@ -359,6 +372,35 @@ mod tests {
                 Two.of(Hearts),
                 Three.of(Clubs),
                 Three.of(Spades),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_canonicalize_hand_perverse_case_three() {
+        // Ensure that the hole ambiguity is resolved when the table
+        // has multiple ambiguous groups before an intersection.
+        let hand = vec![
+            Two.of(Spades),
+            Two.of(Clubs),
+            Three.of(Spades),
+            Three.of(Clubs),
+            Four.of(Spades),
+            Four.of(Clubs),
+            Five.of(Spades),
+        ];
+        let canonical = canonicalize_hand(hand.clone());
+
+        assert_eq!(
+            canonical,
+            vec![
+                Two.of(Clubs),
+                Two.of(Diamonds),
+                Three.of(Clubs),
+                Three.of(Diamonds),
+                Four.of(Clubs),
+                Four.of(Diamonds),
+                Five.of(Clubs)
             ]
         );
     }
